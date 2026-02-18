@@ -1,0 +1,212 @@
+{
+  "slice_templates": {
+    "eMBB": {
+      "name": "Enhanced Mobile Broadband",
+      "sst": 1,
+      "description": "High bandwidth for video streaming, AR/VR, large downloads",
+      "default_bandwidth_mbps": 100,
+      "default_latency_ms": 50,
+      "default_priority": 5,
+      "use_cases": ["video_streaming", "ar_vr", "large_downloads", "stadium_event"]
+    },
+    "URLLC": {
+      "name": "Ultra-Reliable Low-Latency Communications",
+      "sst": 2,
+      "description": "Mission-critical applications requiring ultra-low latency",
+      "default_bandwidth_mbps": 50,
+      "default_latency_ms": 1,
+      "default_priority": 1,
+      "use_cases": ["emergency", "autonomous_vehicles", "remote_surgery", "industrial_control"]
+    },
+    "mMTC": {
+      "name": "Massive Machine Type Communications",
+      "sst": 3,
+      "description": "Massive IoT deployments with many low-power devices",
+      "default_bandwidth_mbps": 10,
+      "default_latency_ms": 100,
+      "default_priority": 8,
+      "use_cases": ["iot_sensors", "smart_city", "smart_agriculture", "asset_tracking"]
+    }
+  },
+
+  "qos_profiles": {
+    "conversational_voice": {
+      "5qi": 1,
+      "resource_type": "GBR",
+      "priority": 20,
+      "packet_delay_budget_ms": 100,
+      "packet_error_rate": "1e-2",
+      "description": "Conversational voice"
+    },
+    "live_video_streaming": {
+      "5qi": 2,
+      "resource_type": "GBR",
+      "priority": 40,
+      "packet_delay_budget_ms": 150,
+      "packet_error_rate": "1e-3",
+      "description": "Live video streaming"
+    },
+    "real_time_gaming": {
+      "5qi": 3,
+      "resource_type": "GBR",
+      "priority": 30,
+      "packet_delay_budget_ms": 50,
+      "packet_error_rate": "1e-3",
+      "description": "Real-time gaming"
+    },
+    "video_buffered": {
+      "5qi": 4,
+      "resource_type": "GBR",
+      "priority": 50,
+      "packet_delay_budget_ms": 300,
+      "packet_error_rate": "1e-6",
+      "description": "Non-conversational video (buffered)"
+    },
+    "mission_critical": {
+      "5qi": 5,
+      "resource_type": "GBR",
+      "priority": 10,
+      "packet_delay_budget_ms": 100,
+      "packet_error_rate": "1e-6",
+      "description": "Mission critical user plane"
+    },
+    "tcp_default": {
+      "5qi": 9,
+      "resource_type": "Non-GBR",
+      "priority": 90,
+      "packet_delay_budget_ms": 300,
+      "packet_error_rate": "1e-6",
+      "description": "Default TCP traffic"
+    }
+  },
+
+  "event_profiles": {
+    "stadium_event": {
+      "description": "Large stadium event with live streaming",
+      "expected_users": 50000,
+      "primary_application": "video_streaming",
+      "recommended_slice": "eMBB",
+      "recommended_qos": "live_video_streaming",
+      "bandwidth_multiplier": 3.0,
+      "additional_cells": 15
+    },
+    "emergency_response": {
+      "description": "Emergency situation requiring priority communications",
+      "expected_users": 5000,
+      "primary_application": "voice_and_data",
+      "recommended_slice": "URLLC",
+      "recommended_qos": "mission_critical",
+      "bandwidth_multiplier": 1.5,
+      "additional_cells": 5,
+      "priority_override": 1
+    },
+    "iot_deployment": {
+      "description": "Massive IoT sensor deployment",
+      "expected_users": 100000,
+      "primary_application": "sensor_data",
+      "recommended_slice": "mMTC",
+      "recommended_qos": "tcp_default",
+      "bandwidth_multiplier": 0.5,
+      "additional_cells": 10
+    },
+    "concert": {
+      "description": "Concert or festival with high social media usage",
+      "expected_users": 30000,
+      "primary_application": "social_media_upload",
+      "recommended_slice": "eMBB",
+      "recommended_qos": "video_buffered",
+      "bandwidth_multiplier": 2.5,
+      "additional_cells": 12
+    },
+    "normal_operation": {
+      "description": "Standard network operation",
+      "expected_users": 10000,
+      "primary_application": "mixed",
+      "recommended_slice": "eMBB",
+      "recommended_qos": "tcp_default",
+      "bandwidth_multiplier": 1.0,
+      "additional_cells": 0
+    },
+    "healthcare": {
+      "description": "Healthcare and telemedicine requiring reliable low-latency connections",
+      "expected_users": 2000,
+      "primary_application": "telemedicine",
+      "recommended_slice": "URLLC",
+      "recommended_qos": "mission_critical",
+      "bandwidth_multiplier": 2.0,
+      "additional_cells": 5,
+      "priority_override": 2
+    },
+    "transportation": {
+      "description": "Connected vehicles and autonomous transportation systems",
+      "expected_users": 5000,
+      "primary_application": "vehicle_to_everything",
+      "recommended_slice": "URLLC",
+      "recommended_qos": "mission_critical",
+      "bandwidth_multiplier": 2.5,
+      "additional_cells": 20,
+      "priority_override": 1
+    },
+    "smart_factory": {
+      "description": "Industry 4.0 smart factory with robotics and automation",
+      "expected_users": 10000,
+      "primary_application": "industrial_automation",
+      "recommended_slice": "URLLC",
+      "recommended_qos": "mission_critical",
+      "bandwidth_multiplier": 2.0,
+      "additional_cells": 8,
+      "priority_override": 2
+    },
+    "video_conferencing": {
+      "description": "Enterprise video conferencing and collaboration",
+      "expected_users": 5000,
+      "primary_application": "video_call",
+      "recommended_slice": "eMBB",
+      "recommended_qos": "live_video_streaming",
+      "bandwidth_multiplier": 2.0,
+      "additional_cells": 3
+    },
+    "gaming": {
+      "description": "Cloud gaming and esports requiring low latency",
+      "expected_users": 20000,
+      "primary_application": "real_time_gaming",
+      "recommended_slice": "eMBB",
+      "recommended_qos": "real_time_gaming",
+      "bandwidth_multiplier": 2.5,
+      "additional_cells": 10
+    }
+  },
+
+  "optimization_actions": {
+    "scale_bandwidth": {
+      "description": "Increase or decrease allocated bandwidth",
+      "parameters": ["change_mbps"],
+      "typical_improvement": "20-40% latency reduction",
+      "use_when": ["high_latency", "high_demand"]
+    },
+    "activate_cell": {
+      "description": "Activate additional cells for coverage",
+      "parameters": ["count"],
+      "typical_improvement": "15-30% load reduction",
+      "use_when": ["high_cell_load", "coverage_issues"]
+    },
+    "adjust_priority": {
+      "description": "Change slice priority level",
+      "parameters": ["slice_id", "priority"],
+      "typical_improvement": "30-50% latency reduction for prioritized traffic",
+      "use_when": ["critical_application", "emergency"]
+    },
+    "modify_qos": {
+      "description": "Modify QoS parameters for a slice",
+      "parameters": ["latency_target_ms", "bandwidth_guarantee_mbps"],
+      "typical_improvement": "Varies based on parameters",
+      "use_when": ["qos_violation", "changing_requirements"]
+    },
+    "energy_saving": {
+      "description": "Enable energy saving mode",
+      "parameters": ["mode"],
+      "typical_improvement": "15-30% energy reduction",
+      "use_when": ["low_demand", "green_optimization"]
+    }
+  }
+}
