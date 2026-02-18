@@ -6,16 +6,27 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+def _get_secret(key: str, default: str = "") -> str:
+    """Read from env first, then fall back to st.secrets (Streamlit Cloud)."""
+    value = os.getenv(key, "")
+    if value:
+        return value
+    try:
+        import streamlit as st
+        return st.secrets.get(key, default)
+    except Exception:
+        return default
+
 # =============================================================================
 # LLM Provider Configuration
 # =============================================================================
 # Options: "groq", "openai", "gemini", "ollama"
-LLM_PROVIDER = os.getenv("LLM_PROVIDER", "groq")
+LLM_PROVIDER = _get_secret("LLM_PROVIDER", "groq")
 
-# API Keys (set in .env file)
-GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
-GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "")
+# API Keys (set in .env locally, or in Streamlit Cloud secrets dashboard)
+GROQ_API_KEY = _get_secret("GROQ_API_KEY")
+OPENAI_API_KEY = _get_secret("OPENAI_API_KEY")
+GOOGLE_API_KEY = _get_secret("GOOGLE_API_KEY")
 
 # Model configurations per provider
 LLM_MODELS = {
