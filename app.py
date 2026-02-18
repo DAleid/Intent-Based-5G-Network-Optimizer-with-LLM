@@ -2069,10 +2069,14 @@ def render_metrics_dashboard():
 AUTONOMY_LEVEL = 5  # Level 5 = Full Autonomy (no human intervention)
 
 # Allowed intent types the system knows how to handle
-VALID_INTENT_TYPES = {
+# Intent types are no longer restricted — the LLM generates any type dynamically.
+# This set is kept only for reference; validation no longer rejects unknown types.
+COMMON_INTENT_TYPES = {
     "stadium_event", "concert", "emergency", "iot_deployment",
     "optimization", "general_optimization", "healthcare",
     "transportation", "smart_factory", "video_conferencing", "gaming",
+    "mass_gathering", "education", "drone_operations", "smart_agriculture",
+    "public_safety", "energy_grid",
 }
 
 # =============================================================================
@@ -2223,9 +2227,9 @@ def validate_intent(parsed_intent: dict) -> dict:
     entities = parsed_intent.get("entities", {})
     confidence = parsed_intent.get("confidence", 0)
 
-    # --- 2. Known intent type --------------------------------------------
-    if intent_type not in VALID_INTENT_TYPES:
-        rejections.append(f"Unknown intent type '{intent_type}' — not in approved list.")
+    # --- 2. Intent type check (any LLM-generated type is accepted) --------
+    if not intent_type or intent_type == "unknown":
+        rejections.append("Intent type is missing or unknown — cannot validate.")
     else:
         checks_passed.append(f"Intent type '{intent_type}' is recognized")
 
