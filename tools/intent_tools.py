@@ -243,7 +243,7 @@ def _fallback_intent(user_intent: str, reason: str, use_keyword_fallback: bool =
     so the app degrades gracefully rather than crashing.
     """
     intent_type = "general_optimization"
-    confidence  = 0.60
+    confidence  = 0.75
 
     if use_keyword_fallback and isinstance(user_intent, str):
         text = user_intent.lower()
