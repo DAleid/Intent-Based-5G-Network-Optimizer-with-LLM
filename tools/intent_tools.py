@@ -19,8 +19,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from langchain_core.messages import SystemMessage, HumanMessage
 
-# ── Valid intent types the system recognises ──────────────────────────────
-VALID_INTENT_TYPES = [
+# ── Common intent types (used as examples for the LLM, NOT a restriction) ──
+COMMON_INTENT_TYPES = [
     "stadium_event",
     "concert",
     "emergency",
@@ -39,8 +39,12 @@ INTENT_SYSTEM_PROMPT = """You are an expert 5G network intent parser for a telec
 Your ONLY job is to read a user's natural language request and return a structured JSON object.
 You must NEVER return anything except valid JSON — no explanations, no markdown, no code fences.
 
-INTENT TYPES you must classify into (choose the single best match):
-- stadium_event    : large outdoor events, sports matches, concerts in stadiums
+INTENT TYPE CLASSIFICATION:
+You may use ANY descriptive intent type that best captures the user's request.
+Use lowercase_snake_case for the intent_type value (e.g. "drone_delivery", "smart_agriculture", "public_safety").
+
+Here are some COMMON types for reference, but you are NOT limited to these:
+- stadium_event    : large outdoor events, sports matches
 - concert          : music concerts, festivals, live entertainment
 - emergency        : emergency services, ambulance, police, fire, disaster response
 - iot_deployment   : IoT sensors, smart devices, machine-to-machine, SCADA
@@ -49,21 +53,31 @@ INTENT TYPES you must classify into (choose the single best match):
 - smart_factory    : industrial automation, robots, factory floor
 - video_conferencing: business video calls, webinars, remote meetings
 - gaming           : online gaming, esports, AR/VR gaming
-- general_optimization: anything that does not fit the above
+- education        : remote learning, virtual classrooms, campus connectivity
+- drone_operations : drone delivery, aerial surveillance, UAV fleet management
+- smart_agriculture: precision farming, crop monitoring, agricultural IoT
+- public_safety    : surveillance, crowd monitoring, city-wide safety systems
+- energy_grid      : smart grid, power distribution, utility monitoring
+- general_optimization: use ONLY when no specific category fits
+
+If the user's request describes a use case not listed above, create a new descriptive
+intent_type in snake_case that accurately captures it.
 
 APPLICATION TYPES (for entities.application):
 - video_streaming, voice, data, iot, mixed, gaming, video_conferencing
+- You may also use any other descriptive application type if none of the above fits.
 
 PRIORITY LEVELS: critical, high, normal, low
 
 SLICE TYPES: eMBB, URLLC, mMTC
-- eMBB  → high bandwidth use cases (streaming, gaming, conferencing)
-- URLLC → ultra-low latency (emergency, healthcare, robotics, V2X)
-- mMTC  → massive device count, low bandwidth (IoT, sensors)
+- eMBB  → high bandwidth use cases (streaming, gaming, conferencing, downloads)
+- URLLC → ultra-low latency and high reliability (emergency, healthcare, robotics, V2X, real-time control)
+- mMTC  → massive device count, low bandwidth per device (IoT, sensors, metering)
+Choose the slice type based on the NETWORK REQUIREMENTS of the use case, not just the category name.
 
 Return EXACTLY this JSON structure (no extra fields, no comments):
 {
-  "intent_type": "<one of the 10 types above>",
+  "intent_type": "<descriptive snake_case type>",
   "slice_type": "<eMBB | URLLC | mMTC>",
   "confidence": <float between 0.0 and 1.0>,
   "entities": {
@@ -80,14 +94,14 @@ Return EXACTLY this JSON structure (no extra fields, no comments):
 }
 
 ESTIMATION GUIDELINES for expected_users if not stated:
-- Stadium / Concert: 30000–80000
-- Emergency: 50–500
-- IoT deployment: 1000–50000 (devices, not people)
+- Large events (stadium, concert): 30000–80000
+- Emergency / public safety: 50–500
+- IoT / agriculture / energy: 1000–50000 (devices, not people)
 - Healthcare: 10–200
-- Smart factory: 100–2000 (devices)
-- Gaming / Video conferencing: 100–5000
+- Industrial / factory: 100–2000 (devices)
+- Gaming / video conferencing / education: 100–5000
 - Transportation: 500–10000
-- General: 1000
+- For any other type: estimate based on the use case description
 
 CONFIDENCE scoring:
 - 0.95+ : user gave explicit numbers, clear use case
@@ -125,8 +139,9 @@ def _parse_intent_impl(user_intent: str) -> dict:
 
         # ── Validate and sanitise the returned JSON ──────────────────────
         intent_type = parsed.get("intent_type", "general_optimization")
-        if intent_type not in VALID_INTENT_TYPES:
+        if not intent_type or not isinstance(intent_type, str) or not intent_type.strip():
             intent_type = "general_optimization"
+        intent_type = intent_type.strip().lower().replace(" ", "_")
 
         confidence = float(parsed.get("confidence", 0.8))
         confidence = max(0.0, min(1.0, confidence))   # clamp to [0, 1]
@@ -181,13 +196,33 @@ def _parse_intent_impl(user_intent: str) -> dict:
 
 
 def _default_slice(intent_type: str) -> str:
-    """Return the most appropriate 3GPP slice type for a given intent."""
-    urllc_intents = {"emergency", "healthcare", "transportation"}
-    mmtc_intents  = {"iot_deployment"}
-    if intent_type in urllc_intents:
+    """Return the most appropriate 3GPP slice type for a given intent.
+
+    Works with ANY intent type — uses keyword matching on the type name
+    so custom LLM-generated types like 'drone_delivery' or 'smart_agriculture'
+    get a reasonable slice without being in a hardcoded list.
+    """
+    t = intent_type.lower()
+
+    # URLLC — low-latency / high-reliability use cases
+    urllc_keywords = [
+        "emergency", "healthcare", "hospital", "medical", "surgery",
+        "transportation", "vehicle", "v2x", "autonomous", "driving",
+        "factory", "industrial", "robot", "control", "safety",
+        "drone", "uav", "public_safety", "surveillance",
+    ]
+    if any(k in t for k in urllc_keywords):
         return "URLLC"
-    if intent_type in mmtc_intents:
+
+    # mMTC — massive device / IoT use cases
+    mmtc_keywords = [
+        "iot", "sensor", "meter", "agriculture", "farming", "crop",
+        "energy", "grid", "utility", "scada", "device", "m2m",
+    ]
+    if any(k in t for k in mmtc_keywords):
         return "mMTC"
+
+    # eMBB — everything else (high bandwidth default)
     return "eMBB"
 
 
