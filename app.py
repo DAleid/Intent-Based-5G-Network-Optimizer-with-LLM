@@ -32,6 +32,7 @@ from tools.intent_tools import _parse_intent_impl as parse_intent
 from tools.reasoning_llm import (
     generate_reasoning_questions as _llm_questions,
     resolve_conflicts_with_llm,
+    map_intent_to_cells_with_llm,
 )
 from agents.crew import Network5GOptimizationCrew
 
@@ -685,22 +686,10 @@ def render_reasoning_form():
 # Configuration Plan — Visual Display Functions
 # ═══════════════════════════════════════════════════════════════
 
-def _map_intent_to_affected_cells(intent_type):
-    """Map intent types to affected cell IDs in the topology."""
-    mapping = {
-        "stadium_event":        ["C04", "C01", "C08"],
-        "concert":              ["C04", "C01", "C08"],
-        "emergency":            ["C05", "C02", "C01"],
-        "healthcare":           ["C05", "C02", "C11"],
-        "iot_deployment":       ["C06", "C03", "C10"],
-        "smart_factory":        ["C06", "C03", "C10"],
-        "transportation":       ["C01", "C02", "C03", "C07"],
-        "gaming":               ["C07", "C01", "C09"],
-        "video_conferencing":   ["C11", "C12", "C09"],
-        "optimization":         ["C01", "C02", "C03"],
-        "general_optimization": ["C01", "C02", "C03"],
-    }
-    return mapping.get(intent_type, ["C01"])
+def _map_intent_to_affected_cells(intent_type, entities=None):
+    """Map intent type to affected topology cell IDs using the LLM.
+    Falls back to keyword matching if LLM is unavailable."""
+    return map_intent_to_cells_with_llm(intent_type, entities or {})
 
 
 def _estimate_expected_impact(config, intent_output):
@@ -782,9 +771,9 @@ def _build_configuration_plan():
         {"parameter": "5QI (QoS Class)", "from": "9 (Best Effort)", "to": f"{qos_5qi} ({'Mission Critical' if qos_5qi <= 2 else 'Real-Time' if qos_5qi <= 4 else 'Standard'})"},
     ]
 
-    # Affected cells
+    # Affected cells — LLM selects the most relevant topology cells
     intent_type = intent_output.get('intent_type', '') if intent_output else ''
-    affected_cells = _map_intent_to_affected_cells(intent_type)
+    affected_cells = _map_intent_to_affected_cells(intent_type, entities)
 
     # Timeline
     time_entity = entities.get('time', '')

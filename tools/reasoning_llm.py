@@ -204,6 +204,110 @@ def generate_conflict_narration(conflict_data: dict) -> str:
         )
 
 
+_TOPOLOGY_CELLS = [
+    {"id": "C01", "label": "Macro-Central",   "description": "Wide-area central coverage"},
+    {"id": "C02", "label": "Macro-North",      "description": "Wide-area coverage, north zone"},
+    {"id": "C03", "label": "Macro-South",      "description": "Wide-area coverage, south zone"},
+    {"id": "C04", "label": "Micro-Stadium",    "description": "Stadium and large outdoor events"},
+    {"id": "C05", "label": "Micro-Hospital",   "description": "Hospital and medical facility area"},
+    {"id": "C06", "label": "Micro-Factory",    "description": "Industrial and factory area"},
+    {"id": "C07", "label": "Micro-Downtown",   "description": "Downtown and urban commercial area"},
+    {"id": "C08", "label": "Pico-Mall",        "description": "Shopping mall indoor coverage"},
+    {"id": "C09", "label": "Pico-University",  "description": "University campus area"},
+    {"id": "C10", "label": "Pico-Park",        "description": "Outdoor park and recreational area"},
+    {"id": "C11", "label": "Femto-Office-A",   "description": "Indoor office building A"},
+    {"id": "C12", "label": "Femto-Office-B",   "description": "Indoor office building B"},
+]
+
+CELL_MAPPING_SYSTEM_PROMPT = """You are a 5G network planning expert.
+
+Given a network intent type and optional context, select the 2-4 topology cells that are most relevant to that intent.
+
+Available cells:
+C01 — Macro-Central: wide-area central coverage
+C02 — Macro-North: wide-area coverage, north zone
+C03 — Macro-South: wide-area coverage, south zone
+C04 — Micro-Stadium: stadium and large outdoor events
+C05 — Micro-Hospital: hospital and medical facility area
+C06 — Micro-Factory: industrial and factory area
+C07 — Micro-Downtown: downtown and urban commercial area
+C08 — Pico-Mall: shopping mall indoor coverage
+C09 — Pico-University: university campus area
+C10 — Pico-Park: outdoor park and recreational area
+C11 — Femto-Office-A: indoor office building A
+C12 — Femto-Office-B: indoor office building B
+
+Rules:
+- Emergency/healthcare intents → always include C05 (Micro-Hospital)
+- Stadium/event intents → always include C04 (Micro-Stadium)
+- Factory/IoT/industrial intents → always include C06 (Micro-Factory)
+- Add macro cells for wide-area coverage when many users are involved
+- Return 2-4 cells maximum
+- Return ONLY a JSON array of cell IDs, no explanation:
+["C05", "C01", "C02"]"""
+
+
+def map_intent_to_cells_with_llm(intent_type: str, entities: dict = None) -> list:
+    """
+    Use Groq LLM to select the most relevant topology cells for a given intent.
+
+    Returns a list of cell ID strings (e.g. ["C05", "C01"]).
+    Falls back to keyword matching if LLM is unavailable.
+    """
+    try:
+        from agents.llm_client import get_llm
+        from langchain_core.messages import SystemMessage, HumanMessage
+
+        llm = get_llm(temperature=0.1)
+
+        context = f"Intent type: {intent_type}"
+        if entities:
+            location = entities.get("location_hint", "")
+            users = entities.get("expected_users", "")
+            app = entities.get("application", "")
+            if location:
+                context += f"\nLocation hint: {location}"
+            if users:
+                context += f"\nExpected users: {users}"
+            if app:
+                context += f"\nApplication: {app}"
+
+        messages = [
+            SystemMessage(content=CELL_MAPPING_SYSTEM_PROMPT),
+            HumanMessage(content=context + "\n\nSelect the most relevant cells."),
+        ]
+
+        response = llm.invoke(messages)
+        raw = response.content.strip()
+        raw = re.sub(r"```(?:json)?", "", raw).strip().rstrip("`").strip()
+        cells = json.loads(raw)
+
+        valid_ids = {c["id"] for c in _TOPOLOGY_CELLS}
+        result = [c for c in cells if c in valid_ids]
+        if result:
+            return result[:4]
+        raise ValueError("No valid cell IDs returned")
+
+    except Exception:
+        return _keyword_cell_fallback(intent_type)
+
+
+def _keyword_cell_fallback(intent_type: str) -> list:
+    """Keyword-based fallback when LLM is unavailable."""
+    t = intent_type.lower()
+    if any(k in t for k in ["emergency", "hospital", "healthcare", "medical", "surgery", "ambulance", "rescue"]):
+        return ["C05", "C02", "C01"]
+    if any(k in t for k in ["stadium", "concert", "match", "festival", "crowd", "event", "pilgrim", "gathering"]):
+        return ["C04", "C01", "C08"]
+    if any(k in t for k in ["iot", "sensor", "factory", "industrial", "robot", "scada", "agriculture", "farm"]):
+        return ["C06", "C03", "C10"]
+    if any(k in t for k in ["transport", "vehicle", "highway", "drone", "traffic", "autonomous", "v2x"]):
+        return ["C01", "C02", "C03", "C07"]
+    if any(k in t for k in ["gaming", "esport", "stream", "video", "conference"]):
+        return ["C07", "C01", "C09"]
+    return ["C01", "C02", "C03"]
+
+
 def resolve_conflicts_with_llm(configs: list, available_bw: float, available_cells: int) -> dict:
     """
     Use Groq LLM to allocate RAN resources among competing stakeholders.
