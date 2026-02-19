@@ -57,6 +57,34 @@ Cover: what the conflict was, how priority-based allocation resolved it, and the
 Be concise, technical but readable. No bullet points. No headers."""
 
 
+CONFLICT_RESOLUTION_SYSTEM_PROMPT = """You are a 5G network resource arbitration AI operating under 3GPP Release 18 principles.
+
+Allocate limited RAN resources (bandwidth and cells) among competing stakeholders based on priority and slice type.
+
+Critical rules:
+- URLLC slices (emergency, healthcare, surgery) MUST receive close to their full requested allocation — life-critical
+- Allocate in priority order: lower priority number = higher priority = gets resources first
+- Do NOT allocate more than what a stakeholder requested
+- Total allocated bandwidth across ALL stakeholders must not exceed available_bandwidth_mbps
+- Total allocated cells across ALL stakeholders must not exceed available_cells
+- For each stakeholder write a specific, practical adjustment_suggestion (1-2 sentences) on how to cope with their allocation
+- satisfaction_score = percentage of requested bandwidth actually received (0-100 integer)
+
+Return ONLY valid JSON — no markdown, no code fences, no explanation:
+{
+  "allocations": [
+    {
+      "intent_type": "string (must match the intent_type given exactly)",
+      "allocated_bandwidth_mbps": number,
+      "allocated_cells": integer,
+      "satisfaction_score": integer,
+      "adjustment_suggestion": "string"
+    }
+  ],
+  "negotiation_narrative": "2-3 sentence plain-language summary of how the negotiation resolved the conflict"
+}"""
+
+
 def generate_reasoning_questions(intent_result: dict) -> list:
     """
     Generate 4 context-aware clarifying questions for the detected intent.
@@ -174,6 +202,156 @@ def generate_conflict_narration(conflict_data: dict) -> str:
             f"mission-critical services received full allocation while lower-priority "
             f"services received proportionally adjusted resources."
         )
+
+
+def resolve_conflicts_with_llm(configs: list, available_bw: float, available_cells: int) -> dict:
+    """
+    Use Groq LLM to allocate RAN resources among competing stakeholders.
+
+    Args:
+        configs: list of config dicts from run_conflict_resolution() — each has
+                 intent_type, label, slice_type, priority, bandwidth_requested, cells_requested
+        available_bw:    total available bandwidth in Mbps (e.g. 500)
+        available_cells: total available cell count
+
+    Returns:
+        {
+            "allocations": [
+                {"intent_type", "allocated_bandwidth_mbps", "allocated_cells",
+                 "satisfaction_score", "adjustment_suggestion"}, ...
+            ],
+            "negotiation_narrative": str
+        }
+    Falls back to priority-based greedy algorithm if LLM is unavailable.
+    """
+    try:
+        from agents.llm_client import get_llm
+        from langchain_core.messages import SystemMessage, HumanMessage
+
+        llm = get_llm(temperature=0.2)
+
+        sorted_cfgs = sorted(configs, key=lambda x: x.get("priority", 5))
+        lines = []
+        for c in sorted_cfgs:
+            lines.append(
+                f"  - {c['label']} (intent_type={c['intent_type']}): "
+                f"requests {c['bandwidth_requested']:.0f} Mbps, {c['cells_requested']} cells, "
+                f"slice={c['slice_type']}, priority={c['priority']}"
+            )
+
+        user_message = (
+            f"Available resources:\n"
+            f"  Bandwidth: {available_bw:.0f} Mbps\n"
+            f"  Cells: {available_cells}\n\n"
+            f"Stakeholder requests (sorted by priority, 1 = highest):\n"
+            + "\n".join(lines)
+            + "\n\nAllocate resources and provide adjustment suggestions."
+        )
+
+        messages = [
+            SystemMessage(content=CONFLICT_RESOLUTION_SYSTEM_PROMPT),
+            HumanMessage(content=user_message),
+        ]
+
+        response = llm.invoke(messages)
+        raw = response.content.strip()
+        raw = re.sub(r"```(?:json)?", "", raw).strip().rstrip("`").strip()
+        result = json.loads(raw)
+
+        # ── Safety-clamp all LLM allocations ──
+        allocations = result.get("allocations", [])
+        total_alloc_bw = 0.0
+        total_alloc_cells = 0
+        clamped = []
+        for alloc in allocations:
+            cfg = next((c for c in configs if c["intent_type"] == alloc.get("intent_type")), None)
+            max_bw    = float(cfg["bandwidth_requested"]) if cfg else available_bw
+            max_cells = int(cfg["cells_requested"])       if cfg else available_cells
+
+            alloc_bw    = float(alloc.get("allocated_bandwidth_mbps", 0))
+            alloc_cells = int(alloc.get("allocated_cells", 0))
+
+            # Cannot exceed requested, cannot exceed remaining pool
+            alloc_bw    = max(0.0, min(alloc_bw,    max_bw,    available_bw    - total_alloc_bw))
+            alloc_cells = max(0,   min(alloc_cells,  max_cells, available_cells - total_alloc_cells))
+            sat         = max(0,   min(100, int(alloc.get("satisfaction_score", 0))))
+
+            total_alloc_bw    += alloc_bw
+            total_alloc_cells += alloc_cells
+
+            clamped.append({
+                "intent_type":              alloc.get("intent_type", ""),
+                "allocated_bandwidth_mbps": round(alloc_bw, 1),
+                "allocated_cells":          alloc_cells,
+                "satisfaction_score":       sat,
+                "adjustment_suggestion":    str(alloc.get("adjustment_suggestion", "No adjustment needed.")),
+            })
+
+        if not clamped:
+            raise ValueError("LLM returned empty allocations")
+
+        return {
+            "allocations":           clamped,
+            "negotiation_narrative": str(result.get("negotiation_narrative", "")),
+        }
+
+    except Exception:
+        return _greedy_fallback(configs, available_bw, available_cells)
+
+
+def _greedy_fallback(configs: list, available_bw: float, available_cells: int) -> dict:
+    """Priority-based greedy allocation used when LLM is unavailable."""
+    sorted_cfgs   = sorted(configs, key=lambda x: x.get("priority", 5))
+    remaining_bw    = available_bw
+    remaining_cells = available_cells
+    allocations     = []
+
+    for c in sorted_cfgs:
+        req_bw    = float(c.get("bandwidth_requested", 0))
+        req_cells = int(c.get("cells_requested", 0))
+
+        alloc_bw    = min(req_bw,    remaining_bw)
+        alloc_cells = min(req_cells, remaining_cells)
+        remaining_bw    = max(0.0, remaining_bw    - alloc_bw)
+        remaining_cells = max(0,   remaining_cells - alloc_cells)
+
+        bw_sat   = (alloc_bw    / req_bw    * 100) if req_bw    > 0 else 100
+        cell_sat = (alloc_cells / req_cells * 100) if req_cells > 0 else 100
+        sat      = min(100, round(bw_sat * 0.7 + cell_sat * 0.3))
+
+        allocations.append({
+            "intent_type":              c.get("intent_type", ""),
+            "allocated_bandwidth_mbps": round(alloc_bw, 1),
+            "allocated_cells":          alloc_cells,
+            "satisfaction_score":       sat,
+            "adjustment_suggestion":    _default_adjustment(c.get("intent_type", ""), c.get("slice_type", "eMBB"), sat),
+        })
+
+    return {
+        "allocations": allocations,
+        "negotiation_narrative": (
+            f"Priority-based fallback allocation applied across {len(configs)} stakeholders. "
+            f"Higher-priority services received preferential resource allocation."
+        ),
+    }
+
+
+def _default_adjustment(intent_type: str, slice_type: str, satisfaction: int) -> str:
+    """Static adjustment suggestion used only in the greedy fallback."""
+    if satisfaction >= 95:
+        return "Full resource allocation granted. No adjustments needed."
+    suggestions = {
+        "stadium_event":      "Reduce video streaming 4K → 1080p. 50K fans still get a smooth live experience.",
+        "concert":            "Limit social media uploads to standard quality. Batch non-urgent uploads.",
+        "healthcare":         "Full allocation guaranteed — patient safety is non-negotiable.",
+        "emergency":          "Full allocation guaranteed — emergency response is non-negotiable.",
+        "smart_factory":      "Prioritize safety-critical robot controls. Batch analytics data every 10 s.",
+        "iot_deployment":     "Increase sensor reporting interval 1 s → 30 s. Batch non-critical telemetry.",
+        "transportation":     "Prioritize V2X safety messages. Reduce infotainment bandwidth.",
+        "gaming":             "Reduce to 1080p/60 fps. Prioritize game control packets over cosmetic data.",
+        "video_conferencing": "Reduce video 1080p → 720p. Enable audio-only fallback for overflow.",
+    }
+    return suggestions.get(intent_type, f"Reduce {slice_type} allocation proportionally to available capacity.")
 
 
 # ── Static fallback question bank ────────────────────────────────────────

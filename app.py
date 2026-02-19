@@ -29,7 +29,10 @@ from tools.monitor_tools import _get_metrics_impl as get_metrics, _check_status_
 from tools.action_tools import _execute_action_impl as execute_action
 from config.settings import KPI_THRESHOLDS, NETWORK_CONFIG
 from tools.intent_tools import _parse_intent_impl as parse_intent
-from tools.reasoning_llm import generate_reasoning_questions as _llm_questions
+from tools.reasoning_llm import (
+    generate_reasoning_questions as _llm_questions,
+    resolve_conflicts_with_llm,
+)
 from agents.crew import Network5GOptimizationCrew
 
 
@@ -2721,24 +2724,7 @@ STAKEHOLDER_LABELS = {
 }
 
 
-def _get_adjustment_suggestion(intent_type, slice_type, satisfaction):
-    """Generate human-readable adjustment suggestion based on satisfaction level"""
-    if satisfaction >= 95:
-        return "Full resource allocation granted. No adjustments needed."
-
-    suggestions = {
-        "stadium_event": "Reduce video streaming 4K → 1080p. 50K fans still get smooth live experience.",
-        "concert": "Limit social media uploads to standard quality. Batch non-urgent uploads.",
-        "healthcare": "Full allocation guaranteed — patient safety is non-negotiable.",
-        "emergency": "Full allocation guaranteed — emergency response is non-negotiable.",
-        "smart_factory": "Prioritize safety-critical robot controls. Batch analytics data every 10s.",
-        "iot_deployment": "Increase sensor reporting interval 1s → 30s. Batch non-critical telemetry.",
-        "transportation": "Prioritize V2X safety messages. Reduce infotainment bandwidth.",
-        "gaming": "Reduce to 1080p/60fps. Prioritize game control packets over cosmetic data.",
-        "video_conferencing": "Reduce video 1080p → 720p. Enable audio-only fallback for overflow.",
-    }
-
-    return suggestions.get(intent_type, f"Reduce {slice_type} allocation proportionally to available capacity.")
+# _get_adjustment_suggestion removed — now handled by resolve_conflicts_with_llm()
 
 
 def run_conflict_resolution(intent_texts):
@@ -2834,59 +2820,55 @@ def run_conflict_resolution(intent_texts):
         })
     step_placeholder.empty()
 
-    # ── Step 4: Resolve conflicts ──
-    if has_conflict:
-        step_placeholder = st.empty()
-        with step_placeholder.container():
-            st.markdown("""
-            <div style="background-color: #f8d7da; border: 2px solid #dc3545; border-radius: 10px; padding: 1rem;">
-                <b>⚡ Agent 4 — Optimizer:</b> Negotiating priority-based resource allocation...
-            </div>
-            """, unsafe_allow_html=True)
-        time.sleep(2)
-        step_placeholder.empty()
+    # ── Step 4: LLM-powered conflict resolution ──
+    step_placeholder = st.empty()
+    with step_placeholder.container():
+        st.markdown("""
+        <div style="background-color: #f8d7da; border: 2px solid #dc3545; border-radius: 10px; padding: 1rem;">
+            <b>⚡ Agent 4 — Optimizer:</b> Negotiating resource allocation with AI...
+        </div>
+        """, unsafe_allow_html=True)
+    time.sleep(1.5)
+    step_placeholder.empty()
 
-    # Sort by priority (lower number = higher priority = gets resources first)
-    sorted_configs = sorted(configs, key=lambda x: x["priority"])
+    llm_result = resolve_conflicts_with_llm(
+        configs, TOTAL_AVAILABLE_BANDWIDTH_MBPS, TOTAL_AVAILABLE_CELLS
+    )
 
-    remaining_bw = TOTAL_AVAILABLE_BANDWIDTH_MBPS
-    remaining_cells = TOTAL_AVAILABLE_CELLS
-
+    # Map LLM allocations back to the full config dicts
     resolutions = []
-    for config in sorted_configs:
-        req_bw = config["bandwidth_requested"]
-        req_cells = config["cells_requested"]
-
-        alloc_bw = min(req_bw, remaining_bw)
-        alloc_cells = min(req_cells, remaining_cells)
-
-        remaining_bw = max(0, remaining_bw - alloc_bw)
-        remaining_cells = max(0, remaining_cells - alloc_cells)
-
-        bw_sat = (alloc_bw / req_bw * 100) if req_bw > 0 else 100
-        cell_sat = (alloc_cells / req_cells * 100) if req_cells > 0 else 100
-        satisfaction = round(bw_sat * 0.7 + cell_sat * 0.3)
-        satisfaction = min(100, satisfaction)
-
-        adjustment = _get_adjustment_suggestion(
-            config["intent_type"], config["slice_type"], satisfaction
-        )
-
+    resolved_types = set()
+    for alloc in llm_result["allocations"]:
+        cfg = next((c for c in configs if c["intent_type"] == alloc["intent_type"]), None)
+        if cfg is None:
+            continue
+        resolved_types.add(alloc["intent_type"])
         resolutions.append({
-            **config,
-            "bandwidth_allocated": round(alloc_bw, 1),
-            "cells_allocated": alloc_cells,
-            "satisfaction": satisfaction,
-            "adjustment": adjustment,
+            **cfg,
+            "bandwidth_allocated": alloc["allocated_bandwidth_mbps"],
+            "cells_allocated":     alloc["allocated_cells"],
+            "satisfaction":        alloc["satisfaction_score"],
+            "adjustment":          alloc["adjustment_suggestion"],
         })
+    # Safety net: add any configs the LLM missed
+    for cfg in configs:
+        if cfg["intent_type"] not in resolved_types:
+            resolutions.append({
+                **cfg,
+                "bandwidth_allocated": 0,
+                "cells_allocated":     0,
+                "satisfaction":        0,
+                "adjustment":          "No resources could be allocated.",
+            })
 
-    if has_conflict:
-        sorted_for_log = sorted(resolutions, key=lambda x: x["priority"])
-        negotiation_log.append({
-            "agent": "Optimizer",
-            "message": "Priority-based resolution applied: " +
-                       " → ".join([f"{r['icon']}{r['label']} gets {r['satisfaction']}%" for r in sorted_for_log])
-        })
+    negotiation_log.append({
+        "agent": "Optimizer",
+        "message": llm_result.get(
+            "negotiation_narrative",
+            "AI-powered resolution applied: " +
+            " → ".join([f"{r['icon']}{r['label']} gets {r['satisfaction']}%" for r in resolutions])
+        ),
+    })
 
     # Save to session state
     st.session_state.conflict_results = {

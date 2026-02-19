@@ -84,7 +84,7 @@ toc_items = [
     '3. Agent Pipeline',
     '4. Dataset',
     '5. Network Topology',
-    '6. Supported Intent Types',
+    '6. Dynamic Intent Classification',
     '7. Multi-Intent Conflict Resolution',
     '8. KPI Thresholds',
     '9. 3GPP Standards Compliance',
@@ -152,13 +152,19 @@ add_bullet('Dataset-driven simulator cycles through real records sequentially')
 # ═══════════════════════════════════════════════════════════════
 doc.add_heading('3. Agent Pipeline', level=1)
 
+doc.add_paragraph(
+    'All agents except the Validator are powered by Groq LLM. The LLM dynamically generates '
+    'intent classifications, clarifying questions, and network configurations \u2014 nothing is '
+    'hardcoded. Every LLM output is safety-clamped before execution.'
+)
+
 add_table(
     ['#', 'Agent', 'Powered By', 'Role'],
     [
-        ['1', 'Intent Parser', 'Groq LLM', 'Converts natural language into a structured intent object (type, priority, slice, timing, SLA targets)'],
-        ['2', 'Reasoner', 'Groq LLM', 'Asks clarifying questions, assesses feasibility, identifies risks, simulates impact'],
+        ['1', 'Intent Parser', 'Groq LLM', 'Converts natural language into a structured intent object. Creates dynamic intent types (e.g. stadium_event, drone_delivery) \u2014 not limited to a fixed list.'],
+        ['2', 'Reasoner', 'Groq LLM', 'Generates context-aware clarifying questions, assesses feasibility, identifies risks, simulates impact'],
         ['3', 'Validator', 'Rule-based', 'Hard safety gate \u2014 enforces bandwidth caps, user limits, confidence thresholds. Cannot be overridden by LLM'],
-        ['4', 'Planner', 'Groq LLM', 'Generates a 3GPP-compliant network configuration (slice type, QoS, RAN params)'],
+        ['4', 'Planner', 'Groq LLM', 'LLM generates full 3GPP config (slice, bandwidth, latency, MIMO, scheduler, cells) based on the intent. All values safety-clamped.'],
         ['5', 'Monitor', 'Groq LLM', 'Reads real KPIs from the dataset/simulator, detects anomalies, triggers alerts'],
         ['6', 'Optimizer', 'Groq LLM', 'Executes corrective actions, with automatic rollback if metrics degrade'],
     ]
@@ -257,23 +263,52 @@ doc.add_paragraph(
 # ═══════════════════════════════════════════════════════════════
 # 6. SUPPORTED INTENT TYPES
 # ═══════════════════════════════════════════════════════════════
-doc.add_heading('6. Supported Intent Types', level=1)
+doc.add_heading('6. Dynamic Intent Classification', level=1)
+
+doc.add_paragraph(
+    'The system uses the Groq LLM to classify user intents into ANY descriptive type \u2014 '
+    'there is no hardcoded whitelist. The LLM generates a custom snake_case intent type '
+    'that best describes the user\'s request (e.g. stadium_event, drone_delivery, '
+    'smart_agriculture, world_cup_event). This means the system can handle novel use cases '
+    'without code changes.'
+)
+
+doc.add_heading('Slice Type Assignment', level=2)
+doc.add_paragraph(
+    'The 3GPP slice type (eMBB, URLLC, mMTC) is determined by keyword matching on the '
+    'intent type name, so even custom LLM-generated types get an appropriate slice:'
+)
 
 add_table(
-    ['Intent', 'Example Phrase', 'Slice'],
+    ['Slice', 'Keyword Triggers', 'Use Cases'],
     [
-        ['Stadium Event', '"Optimize for the match tonight"', 'eMBB'],
-        ['Emergency', '"Emergency priority at the hospital"', 'URLLC'],
-        ['IoT Deployment', '"10,000 sensors in the factory"', 'mMTC'],
-        ['Healthcare', '"Low latency for telemedicine"', 'URLLC'],
-        ['Video Streaming', '"High quality live stream"', 'eMBB'],
-        ['Smart Factory', '"Industrial automation connectivity"', 'URLLC'],
-        ['Gaming', '"Minimize latency for gaming"', 'URLLC'],
-        ['Concert / Event', '"Social media heavy event"', 'eMBB'],
-        ['Transportation', '"Vehicle connectivity on the highway"', 'URLLC'],
-        ['General Optimization', '"Improve network performance"', 'eMBB'],
+        ['URLLC', 'emergency, healthcare, surgery, vehicle, drone, factory, safety, robot, control', 'Low latency, high reliability'],
+        ['mMTC', 'iot, sensor, agriculture, energy, grid, meter, scada, device', 'Massive device count, low bandwidth per device'],
+        ['eMBB', 'Everything else (default)', 'High bandwidth \u2014 streaming, events, gaming, general'],
     ]
 )
+
+doc.add_heading('Example Intent Classifications', level=2)
+add_table(
+    ['User Input', 'LLM-Generated Type', 'Slice'],
+    [
+        ['"Optimize for the football match tonight"', 'stadium_event', 'eMBB'],
+        ['"Emergency at the hospital"', 'emergency', 'URLLC'],
+        ['"10,000 IoT sensors in the factory"', 'iot_deployment', 'mMTC'],
+        ['"Drone delivery fleet management"', 'drone_delivery', 'URLLC'],
+        ['"World Cup match tonight"', 'world_cup_event', 'eMBB'],
+        ['"Smart agriculture monitoring"', 'smart_agriculture', 'mMTC'],
+        ['"Improve network performance"', 'general_optimization', 'eMBB'],
+    ]
+)
+
+p = doc.add_paragraph()
+r = p.add_run(
+    'Note: The LLM estimates expected users, bandwidth, latency, and priority based on '
+    'the use case context. For example, a stadium event may estimate 50,000 users while '
+    'an emergency may estimate 200 responders.'
+)
+r.italic = True
 
 # ═══════════════════════════════════════════════════════════════
 # 7. MULTI-INTENT CONFLICT RESOLUTION
@@ -414,10 +449,10 @@ add_table(
         ['agents/monitor_agent.py', 'Monitor agent definition'],
         ['agents/optimizer_agent.py', 'Optimizer agent definition'],
         ['tools/intent_tools.py', 'parse_intent (LLM + keyword fallback)'],
-        ['tools/config_tools.py', 'generate_config, get_templates'],
+        ['tools/config_tools.py', 'LLM-generated 3GPP configs with safety clamping'],
         ['tools/monitor_tools.py', 'get_metrics, check_status'],
         ['tools/action_tools.py', 'execute_action, rollback'],
-        ['tools/reasoning_llm.py', 'Feasibility, risk, impact reasoning'],
+        ['tools/reasoning_llm.py', 'LLM-generated clarifying questions + conflict narration'],
         ['simulator/network_sim.py', 'Dataset-driven 5G network simulator'],
         ['config/settings.py', 'LLM config, KPI thresholds, network limits'],
         ['data/6G_HetNet_Transmission_Management.csv', 'Real dataset (5,000 rows)'],
