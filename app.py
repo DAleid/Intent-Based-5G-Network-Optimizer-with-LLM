@@ -34,6 +34,21 @@ from tools.reasoning_llm import (
     resolve_conflicts_with_llm,
     map_intent_to_cells_with_llm,
 )
+# crewai 0.86 imports pkg_resources (from setuptools) in its telemetry module.
+# On some cloud environments pkg_resources is missing even when setuptools is
+# installed. This shim registers a minimal mock before crewai is loaded.
+try:
+    import pkg_resources  # noqa: F401
+except ImportError:
+    import types as _types, sys as _sys
+    _pkg = _types.ModuleType("pkg_resources")
+    def _get_distribution(name):
+        class _Dist:
+            version = "0.0.0"
+        return _Dist()
+    _pkg.get_distribution = _get_distribution
+    _sys.modules["pkg_resources"] = _pkg
+
 from agents.crew import Network5GOptimizationCrew
 
 
