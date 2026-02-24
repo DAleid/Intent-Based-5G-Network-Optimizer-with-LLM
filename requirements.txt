@@ -1,5 +1,8 @@
 # 5G-Advanced Network Optimizer - Dependencies
 
+# Must be first — crewai telemetry imports pkg_resources from setuptools
+setuptools>=68.0.0
+
 # Core Framework
 crewai==0.86.0
 crewai-tools>=0.17.0
@@ -17,7 +20,6 @@ plotly>=5.24.0
 # Utilities
 python-dotenv>=1.0.0
 pydantic>=2.9.0
-setuptools>=68.0.0
 
 # Data handling
 pandas>=2.2.0
