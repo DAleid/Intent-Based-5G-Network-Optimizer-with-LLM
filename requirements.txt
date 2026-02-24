@@ -17,6 +17,7 @@ plotly>=5.24.0
 # Utilities
 python-dotenv>=1.0.0
 pydantic>=2.9.0
+setuptools>=68.0.0
 
 # Data handling
 pandas>=2.2.0
