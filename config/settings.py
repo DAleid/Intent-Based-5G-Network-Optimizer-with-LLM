@@ -30,7 +30,7 @@ GOOGLE_API_KEY = _get_secret("GOOGLE_API_KEY")
 
 # Model configurations per provider
 LLM_MODELS = {
-    "groq": "llama-3.3-70b-versatile",
+    "groq": "openai/gpt-oss-120b",
     "openai": "gpt-4o-mini",
     "gemini": "gemini-1.5-flash",
     "ollama": "llama3"
